@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Screen Recorder</title>
+<style>
+body {
+    font-family: sans-serif;
+    text-align: center;
+}
+
+#video {
+    background-color: black;
+    margin-bottom: 1em;
+}
+
+#record {
+    background-color: rgb(214, 26, 26);
+    border: none;
+    border-radius: 50%;
+    margin: 1em 0;
+    height: 5em;
+    width: 5em;
+}
+
+#record div {
+    background-color: white;
+    border: none;
+    border-radius: 50%;
+    margin: auto;
+    height: 1.5em;
+    width: 1.5em;
+}
+
+#download {
+    display: none;
+    background-color: rgb(75, 218, 57);
+    border-radius: 1em;
+    color: black;
+    text-decoration: none;
+    margin-top: 1em;
+    padding: 1em;
+}
+</style>
+</head>
+<body>
+<h1>Screen Recorder</h1>
+<video id="video" width="569" height="320"></video><br>
+<span id="time">0:00</span><br>
+<button id="record"><div></div></button><br>
+<input type="checkbox" id="mic">
+<label id="micl" for="mic">Mic</label><br>
+<a id="download">Download</a>
+<script>
+const video = document.getElementById('video');
+const time = document.getElementById('time');
+const record = document.getElementById('record');
+const recordIcon = record.querySelector('div');
+const mic = document.getElementById('mic');
+const micl = document.getElementById('micl');
+const download = document.getElementById('download');
+let url = null;
+let recorder = null;
+
+async function addAudioStream(stream) {
+    mic.disabled = true;
+    if (!mic.checked) return;
+
+    let audio;
+    try {
+        audio = await navigator.mediaDevices.getUserMedia({ audio: {
+            autoGainControl: false,
+            noiseSuppression: false,
+            echoCancellation: false,
+            channelCount: 1
+        }});
+    } catch (err) {
+        console.info('No audio: ' + err);
+        micl.innerHTML = "Mic (blocked)";
+        return;
+    }
+
+    audio.getAudioTracks().forEach(track => stream.addTrack(track));
+}
+
+function startVideo(stream) {
+    video.controls = false;
+    video.srcObject = new MediaStream(stream.getVideoTracks());
+    video.play();
+}
+
+function stopVideo() {
+    video.pause();
+    video.srcObject = null;
+    video.controls = true;
+}
+
+function newRecorder(stream, iid) {
+    const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+    const chunks = [];
+
+    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.onstop = e => stopCapture(stream, iid, chunks);
+
+    return recorder;
+}
+
+function finalizeRecording(chunks) {
+    if (chunks.size == 0) return;
+
+    if (url) URL.revokeObjectURL(url);
+
+    const completeBlob = new Blob(chunks, { type: chunks[0].type });
+    url = URL.createObjectURL(completeBlob);
+
+    video.src = url;
+
+    download.href = url;
+    download.download = 'capture.webm';
+    download.style.display = 'inline-block';
+    download.click();
+}
+
+function startTimer() {
+    const start = Math.floor(performance.now() / 1000);
+    let before = start;
+    time.innerHTML = '0:00';
+
+    return setInterval(() => {
+        const now = Math.floor(performance.now() / 1000);
+        if (now == before) return;
+
+        before = now;
+
+        const total = now - start;
+        const min = Math.floor(total / 60);
+        const sec = total - min * 60;
+
+        time.innerHTML = min + ':' + ((sec < 10) ? '0' + sec : sec);
+    }, 200);
+}
+
+async function startCapture() {
+    let stream;
+    try {
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    } catch (err) { console.error('Error: ' + err); return null; }
+
+    await addAudioStream(stream);
+    dumpInfo(stream);
+    startVideo(stream);
+
+    const iid = startTimer();
+
+    const recorder = newRecorder(stream, iid);
+    recorder.start();
+
+    recordIcon.style.borderRadius = 0;
+
+    return recorder;
+}
+
+function stopCapture(stream, iid, chunks) {
+    recordIcon.style = '';
+    clearInterval(iid);
+    stopVideo();
+    stream.getTracks().forEach(track => track.stop());
+    micl.innerHTML = "Mic";
+    mic.disabled = false;
+
+    finalizeRecording(chunks);
+
+    recorder = null;
+    record.disabled = false;
+}
+
+function dumpInfo(stream) {
+    stream.getTracks().forEach(track => {
+        console.info("\nTrack settings:\n" +
+            JSON.stringify(track.getSettings()) +
+            "\nTrack constraints:\n" +
+            JSON.stringify(track.getConstraints()));
+    });
+}
+
+record.onclick = async e => {
+    record.disabled = true;
+
+    if (recorder) {
+        recorder.stop();
+    } else {
+        recorder = await startCapture();
+        record.disabled = false;
+    }
+};
+</script>
+</body>
+</html>
